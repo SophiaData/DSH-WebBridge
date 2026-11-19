@@ -444,6 +444,7 @@ export class ChatSession {
       let uploaded
       let watchId
       let preservePage = false
+      let completed = false
       try {
       const site = options.site || this.settings.site
       const adapter = this.adapter(site)
@@ -610,6 +611,7 @@ export class ChatSession {
           if (entry.url) await this.driver.updateSessionInfo?.(key, { url: entry.url, title: entry.title || '', generation, pending: false, needsContext: false, contextResetReason: '' })
         } catch {}
       }
+      completed = true
       return { site, reply: reply.text, title, ...reply, totalMs: Date.now() - started,
         submittedText: text, conversation,
         conversationReset: submission.conversationReset,
@@ -624,9 +626,11 @@ export class ChatSession {
         if (watchId && options.signal?.aborted && this.driver.stopGeneration) await this.driver.stopGeneration(watchId).catch(() => {})
         if (watchId && this.driver.endGenerationWatch) await this.driver.endGenerationWatch(watchId).catch(() => {})
         await uploaded?.release?.()
-        if (options.sessionKey && !preservePage) await this.driver.releasePage?.(queueKey)
+        // 成功的轮次保留页签供下一轮直接复用：少一次整页导航，显著降低被
+        // Cloudflare 挑战的概率。失败或发送结果不明时仍释放/保留现场。
+        if (options.sessionKey && !preservePage && !completed) await this.driver.releasePage?.(queueKey)
         if (this.driver.activities?.get(queueKey) === activity) this.driver.activities.delete(queueKey)
-        activity.emit('request.released', preservePage ? '已保留发送结果不明的网页现场' : '本轮网页操作已清理结束')
+        activity.emit('request.released', preservePage ? '已保留发送结果不明的网页现场' : completed ? '本轮结束，网页会话保留供下一轮复用' : '本轮网页操作已清理结束')
       }
     }, queueKey)
   }

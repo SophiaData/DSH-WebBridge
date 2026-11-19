@@ -195,7 +195,11 @@ export class ChatgptModels {
       await this.chooseModel(choice.modelName)
       await this.power(choice.power)
       const selected = await this.read()
-      if (selected.modelName !== choice.modelName || selected.power !== choice.power || selected.label !== choice.label) throw new BridgeError('model-not-selected', '网页模型或思考档位与 DSH 选择不符，尚未发送消息。')
+      // 档位标签会随页面/语言本地化（新会话页显示 High，会话页显示「高」），
+      // 目录与选择往往发生在不同页面，因此只比对与语言无关的模型名、档位下标和
+      // effort 属性，不再比对展示文本 label。
+      const effortMismatch = Boolean(choice.effort && selected.effort && choice.effort !== selected.effort)
+      if (selected.modelName !== choice.modelName || selected.power !== choice.power || effortMismatch) throw new BridgeError('model-not-selected', '网页模型或思考档位与 DSH 选择不符，尚未发送消息。')
       return selected
     } finally { await page.keyboard.press('Escape').catch(() => {}) }
   }
