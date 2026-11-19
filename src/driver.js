@@ -14,6 +14,22 @@ const DEFAULT_SESSION = '__webbridge_default__'
 const STOP_SELECTOR = 'button[data-testid="stop-button"],button[aria-label="停止"],button[aria-label="停止生成"],button[aria-label="停止流式传输"],button[aria-label="Stop"],button[aria-label="Stop generating"],button[aria-label="Stop streaming"]'
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
+// ChatGPT renders replies in a React virtualized list. Between resolving a
+// locator to a handle and acting on it, the node can be torn down and
+// re-rendered, which Playwright surfaces as a bare `Error`, not a
+// TimeoutError, e.g. "Element is not attached to the DOM". Such races are
+// transient and safe to retry; anything else must still propagate. Closed
+// pages/contexts and aborts are explicitly excluded so they keep their own
+// semantics and never get mistaken for a re-render.
+const ROWS_RERENDERED = /Element is not attached to the DOM|JSHandle is disposed|Execution context was destroyed|Cannot find context|frame (?:was|got) detached/i
+function rowsRerendered(error) {
+  if (!error) return false
+  if (error.name === 'TimeoutError' || error.name === 'AbortError') return false
+  const message = String(error.message || '')
+  if (/Target (?:page|context|browser).*closed|has been closed/i.test(message)) return false
+  return ROWS_RERENDERED.test(message)
+}
+
 export function detectChromeVersion(executablePath, fallback = '') {
   const directories = [dirname(executablePath)]
   if (process.platform === 'darwin') directories.push(join(dirname(executablePath), '..', 'Frameworks', 'Google Chrome Framework.framework', 'Versions'))
@@ -302,17 +318,33 @@ export class BrowserDriver {
     const command = { signal, timeout: Math.min(2500, this.settings.commandTimeoutMs || 2500) }
     const scrollAndFind = async () => {
       check()
-      await this.scrollToBottom({ signal })
       try {
-        await target.waitFor({ ...command, state: 'visible' })
-        await target.scrollIntoViewIfNeeded(command)
-        check()
-        return true
+        await this.scrollToBottom({ signal })
       } catch (error) {
         check()
-        if (error.name !== 'TimeoutError') throw error
-        return false
+        if (!rowsRerendered(error)) throw error
       }
+      // Bound retries: each waitFor re-resolves the locator to a fresh handle,
+      // so a node that React re-rendered between resolve and scroll gets picked
+      // up again. A TimeoutError still means "not found" and falls straight
+      // through to the reopen path, preserving the original cadence.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        check()
+        try {
+          await target.waitFor({ ...command, state: 'visible' })
+          await target.scrollIntoViewIfNeeded({ ...command, timeout: Math.max(300, Math.min(1200, command.timeout)) })
+          check()
+          return true
+        } catch (error) {
+          check()
+          if (error.name === 'TimeoutError') return false
+          if (!rowsRerendered(error)) throw error
+          if (attempt === 2) return false
+          await sleep(120 + attempt * 200)
+          check()
+        }
+      }
+      return false
     }
     if (await scrollAndFind()) return { found: true, reloaded: false }
     activity?.emit('reply.reloading', '滚动后仍未找到本轮元素，正在重新打开原网页会话')
