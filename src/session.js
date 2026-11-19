@@ -189,7 +189,6 @@ export class ChatSession {
       return (adapter.pluginName ? content.split(adapter.pluginName).join('') : content).replace(/\s+/g, '')
     }
     const newTurn = sent.userTurnKey && !sent.userTurnKey.startsWith('fallback-') && sent.userTurnKey !== baseline.userTurnKey
-    if (newTurn && normalize(sent.userText) === normalize(text)) return { sent }
     const composer = (await this.driver.eval(`(() => {
       const editors = Array.from(document.querySelectorAll(${JSON.stringify(adapter.inputSelector)}))
         .filter((node) => node.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
@@ -200,6 +199,19 @@ export class ChatSession {
         return copy.textContent || '';
       }).join('\\n') };
     })()`, { signal }))?.result
+    const composerBlank = !(composer?.composerCount > 0) || !String(composer?.composerText || '').trim()
+    // A genuinely new user turn (new turn key, not the fallback) is the
+    // authoritative "the message left" signal: the site itself recorded our
+    // prompt as a conversation turn, so the send definitely landed. Accept it
+    // even when the scraped userText does not compare equal (ChatGPT re-renders
+    // prompts into sanitized nodes — e.g. image placeholders — so the text is
+    // not a byte-for-byte mirror), and even when a blank composer happened to
+    // swallow the leaked draft text so composerText reads back as the message.
+    if (newTurn) return { sent }
+    // Fallback: the composer is empty (the draft was consumed) yet the page's
+    // visible turn text equals what we sent. The send landed; a lingering copy
+    // of the text is a rendering leak, not an unsent draft.
+    if (composerBlank && normalize(sent.userText) === normalize(text) && !sent.streaming) return { sent }
     // Sites without ChatGPT's turn markers can never satisfy the userTurnKey
     // check above, so a real send would land as "uncertain" forever. For them a
     // send counts as delivered when the draft left the composer and the page
