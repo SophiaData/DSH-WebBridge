@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path'
 import { SITE_PRESETS, expandHome } from './config.js'
 import { BridgeError } from './envelope.js'
 import { domToMarkdown } from './markdown.js'
+import { buildGeminiReadExpression } from './gemini-dom.js'
 
 /** Path of the persisted adapter for one site. */
 export function adapterPath(settings, site) {
@@ -69,6 +70,7 @@ export function listAdapters(settings) {
  * re-renders that would silently detach an injected observer.
  */
 export function buildReadExpression(adapter) {
+  if (adapter.site === 'gemini') return buildGeminiReadExpression()
   const messageSelector = JSON.stringify(adapter.messageSelector || '')
   const streamingSelector = JSON.stringify(adapter.streamingSelector || '')
   return `(() => {

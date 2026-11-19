@@ -142,9 +142,15 @@ export async function waitForReply({ driver, adapter, baseline, settings, signal
     const currentUserKey = targetTurnKey && state.replyTurnKey === targetTurnKey ? targetTurnKey : state.userTurnKey
     const newUserTurn = Boolean(currentUserKey && currentUserKey !== baseline?.userTurnKey)
     const targetMatches = targetTurnKey ? currentUserKey === targetTurnKey : promptMatches
-    const reachedNow = adapter.matchReplyToUserTurn
-      ? Boolean(newUserTurn && state.replyTurnKey === currentUserKey && targetMatches)
-      : adapter.requireCountGrowth ? grown : grown || changed
+    // Gemini's user-query identity is stronger than an assistant node count:
+    // don't accept a stale response while a new prompt is being submitted.
+    const geminiNewQuery = adapter.site === 'gemini' && expected && state.userTurnKey &&
+      state.userTurnKey !== baseline?.userTurnKey && normalize(state.userText) === expected
+    const reachedNow = adapter.site === 'gemini'
+      ? Boolean(geminiNewQuery && (grown || changed))
+      : adapter.matchReplyToUserTurn
+        ? Boolean(newUserTurn && state.replyTurnKey === currentUserKey && targetMatches)
+        : adapter.requireCountGrowth ? grown : grown || changed
     if (reconnectPending) {
       if (reachedNow || state.streaming && state.userTurnKey === targetTurnKey && promptMatches) {
         reconnectPending = false

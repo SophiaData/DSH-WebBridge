@@ -21,6 +21,7 @@ import { runAgentLoop, createMetaTools } from './src/agent.js'
 import { writeActivation } from './src/activation.js'
 import { createToolScope } from './src/dsh.js'
 import { WebChatAdapter } from './src/provider.js'
+import { parseGeminiReply } from './src/gemini-protocol.js'
 import { WebBridgeSetup, mountSetupService } from './src/setup.js'
 import { createModelSources, modelSourceFor } from './src/models/index.js'
 import { planConversationSync, appendMissingWebTurns } from './src/conversation-sync.js'
@@ -392,7 +393,7 @@ export function apply(ctx, config = {}) {
         { id: 'webbridge-duckai', name: 'WebBridge · Duck.ai', site: 'duckai', modelId: 'duckai-web', withTools: false },
         { id: 'webbridge-qwen', name: 'WebBridge · 通义千问', site: 'qwen', modelId: 'qwen-web', withTools: false },
         { id: 'webbridge-dola', name: 'WebBridge · Dola', site: 'dola', modelId: 'dola-web', withTools: false },
-        { id: 'webbridge-gemini', name: 'WebBridge · Gemini', site: 'gemini', modelId: 'gemini-web', withTools: false },
+        { id: 'webbridge-gemini', name: 'WebBridge · Gemini', site: 'gemini', modelId: 'gemini-web', withTools: true },
         { id: 'webbridge-aistudio', name: 'WebBridge · AI Studio', site: 'aistudio', modelId: 'aistudio-web', withTools: false },
       ].filter(route => visible.includes(route.site))
       const registered = []
@@ -410,12 +411,13 @@ export function apply(ctx, config = {}) {
             session: routeSession,
             settings: routeSettings,
             log,
-            parseReply: null,
+            parseReply: route.site === 'gemini' ? parseGeminiReply : null,
             toolScope,
             contextStore,
             contextAvailable: () => bridge.catalog().some(tool => tool.name === CONTEXT_TOOL_NAME),
             modelCatalog: routeModels ? () => routeModels.list() : undefined,
             accountTier: async () => {
+              if (route.site !== 'chatgpt') return 'unknown'
               try { return await setup.browser.observeAccount() } catch { return setup.browser.saved.accountTier || 'unknown' }
             },
             siteAuth: () => setup.browser.auth[route.site] || 'unknown',

@@ -680,7 +680,10 @@ export class ChatSession {
     while (Date.now() < deadline) {
       try {
         const state = await readReplyState(this.driver, adapter, options.signal)
-        if (state.count === 0 && (!this.driver.composerBlank || await this.driver.composerBlank(adapter.inputSelector, { signal: options.signal }))) return true
+        // Gemini can render an empty reply list while a previous user-query is
+        // still present. Require the blank /app route and no user turn as well.
+        const geminiBlank = site !== 'gemini' || (state.url && !state.userTurnKey && /^\/app\/?$/.test(new URL(state.url).pathname))
+        if (state.count === 0 && geminiBlank && (!this.driver.composerBlank || await this.driver.composerBlank(adapter.inputSelector, { signal: options.signal }))) return true
       } catch {}
       await new Promise((resolve) => setTimeout(resolve, 400))
     }
@@ -690,6 +693,13 @@ export class ChatSession {
   async startNewChat(site, options = {}) {
     options.activity?.emit('conversation.resetting', '正在等待网页清空并创建新会话')
     const preset = this.sitePreset(site)
+    // Gemini assigns /app/<id> on first submission; /app is its blank-chat route.
+    // Never try the ChatGPT new-chat shortcut or sidebar selector on Gemini.
+    if (site === 'gemini') {
+      await this.driver.open(preset.url, { headed: options.headed, signal: options.signal })
+      if (!await this.waitBlank(site, options)) throw new BridgeError('new-chat-not-ready', 'Gemini 未进入空白会话，未发送消息。')
+      return 'gemini-app'
+    }
     // Verified 2026-11-17: opening the site root does NOT reset the chat (the
     // profile restores the last conversation), while the keyboard shortcut
     // always lands on a blank composer at the top level URL.
@@ -734,6 +744,7 @@ export class ChatSession {
     if (!sessionKey) throw new BridgeError('session-required', '读取网页消息需要当前 DSH sessionId。')
     const key = site + ':' + sessionKey
     return this.enqueue(async () => {
+      if (site === 'gemini') throw new BridgeError('sync-not-supported', 'Gemini 暂不支持回填网页历史到 DSH；未修改本地会话。')
       const preset = this.sitePreset(site)
       const known = this.conversations.get(key) || await this.driver.getSessionInfo?.(key)
       const url = String(known?.url || '')
@@ -808,9 +819,13 @@ function sameConversationURL(actual, expected) {
   } catch { return false }
 }
 
-function persistedConversationURL(_site, value, root) {
-  const url = String(value || '')
-  if (!url || url === root) return false
-  return /\/c\//.test(url) && !/\/c\/(?:local-chatgpt|local_)/i.test(decodeURIComponent(url))
+export function persistedConversationURL(site, value, root) {
+  try {
+    const url = new URL(String(value || ''))
+    const home = new URL(root)
+    if (url.origin !== home.origin || url.pathname.replace(/\/$/, '') === home.pathname.replace(/\/$/, '')) return false
+    if (site === 'gemini') return /^\/app\/[A-Za-z0-9_-]+$/.test(url.pathname)
+    return /\/c\//.test(url.pathname) && !/\/c\/(?:local-chatgpt|local_)/i.test(decodeURIComponent(url.pathname))
+  } catch { return false }
 }
 

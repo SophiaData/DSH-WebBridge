@@ -396,7 +396,8 @@ export class WebChatAdapter {
           role: m?.role,
           type: typeof m?.content,
           len: messageText(m).length,
-          head: messageText(m).slice(0, 100),
+          // Do not persist user prompt prefixes or credentials in debug files.
+          contentType: Array.isArray(m?.content) ? 'blocks' : typeof m?.content,
         })),
         tools: (options.tools || []).length,
       }
@@ -453,8 +454,10 @@ export class WebChatAdapter {
     if (!prompt.trim() && !nativeContext) {
       throw new BridgeError('empty-message', `[${this.providerId}] No message text remains after removing DSH context reminders.`)
     }
-    const maxChars = Number(this.settings.providers?.maxPromptChars) || 12000
+    const geminiText = isMainChat && this.settings.site === 'gemini'
+    const maxChars = Number(this.settings.providers?.maxPromptChars) || (geminiText ? 32000 : 12000)
     if (prompt.length > maxChars) {
+      if (geminiText) throw new BridgeError('gemini-prompt-too-large', `Gemini 网页输入超过 ${maxChars} 字符；为避免截断工具参数，请缩小本轮输入。`)
       const head = prompt.slice(0, Math.floor(maxChars * 0.3))
       const tail = prompt.slice(-Math.floor(maxChars * 0.65))
       prompt = `${head}\n\n[…较早的对话已省略…]\n\n${tail}`
@@ -514,7 +517,20 @@ export class WebChatAdapter {
     const previousDelivered = Boolean(previousContextReference && this.contextStore.isDelivered(previousContextReference.context_id))
     const contextBase = contextChanged && previousDelivered ? previousContextReference.context_id : null
     let attachment = null
-    if (isMainChat && !nativeContext) {
+    // Gemini's composer uses a Quill editor and has no ChatGPT-style context
+    // attachment workflow. Send the bounded, exact tool catalogue as text.
+    const geminiFullContext = geminiText ? [
+      flattenMessages(allMessages.filter(message => message.role === 'system')),
+      toolContext,
+      flattenMessages(userMessages.slice(0, -1)),
+    ].filter(Boolean).join('\n\n') : ''
+    const geminiToolUpdate = geminiText && updateTools ? toolContext : ''
+    const composeGemini = background => {
+      const value = [background ? `【DSH 会话上下文与授权工具】\n${background}` : '', prompt].filter(Boolean).join('\n\n')
+      if (value.length > maxChars) throw new BridgeError('gemini-context-too-large', `Gemini 本轮上下文超过 ${maxChars} 字符；请减少工具或新建更短的会话，不能静默截断工具清单。`)
+      return value
+    }
+    if (isMainChat && !nativeContext && !geminiText) {
       const background = [
         !state.contextDelivered ? flattenMessages(allMessages.filter((message) => message.role === 'system')) : '',
         updateTools ? toolContext : '',
@@ -538,9 +554,11 @@ export class WebChatAdapter {
       contextNotice(contextReference, since),
       continuationMessage,
     ].filter(Boolean).join('\n\n')
-    const message = contextReference && !this.contextStore.isDelivered(contextReference.context_id)
-      ? contextMessage(contextBase)
-      : continuationMessage
+    const message = geminiText
+      ? composeGemini(state.contextDelivered ? geminiToolUpdate : geminiFullContext)
+      : contextReference && !this.contextStore.isDelivered(contextReference.context_id)
+        ? contextMessage(contextBase)
+        : continuationMessage
 
     let reply = ''
     let streamedText = ''
@@ -548,7 +566,8 @@ export class WebChatAdapter {
     let streamStarted = false
     let inputInterrupted = false
     const interrupt = new AbortController()
-    const signal = nativeMcp && options.signal ? AbortSignal.any([options.signal, interrupt.signal]) : nativeMcp ? interrupt.signal : options.signal
+    const streamWeb = nativeMcp || geminiText
+    const signal = streamWeb && options.signal ? AbortSignal.any([options.signal, interrupt.signal]) : streamWeb ? interrupt.signal : options.signal
     let unwatch
     let submittedState = {}
     const markSubmitted = (submitted = {}) => {
@@ -560,13 +579,16 @@ export class WebChatAdapter {
       if (withTools && state.contextDelivered) state.toolContext = toolContext
     }
     try {
-      if (nativeMcp && isMainChat) unwatch = this.toolScope?.watchUserInput?.(baseSessionId, () => {
+      if (streamWeb && isMainChat) unwatch = this.toolScope?.watchUserInput?.(baseSessionId, () => {
         activity.emit('input.interrupted', '收到新的用户输入，正在中止上一轮等待')
         inputInterrupted = true; interrupt.abort()
       })
       let nextText = null
       let wake
       const publish = ({ text }) => {
+        // Tool envelopes are emitted as DSH tool-call blocks after completion.
+        // Do not leak a partial Gemini protocol prefix as a text block first.
+        if (geminiText && String(text).trimStart().startsWith('<')) return
         // Do not persist an uninitialized answer as a partial assistant message
         // if the web model ignores bootstrap. Progress snapshots are cumulative;
         // the next update (or final reply) still contains this earlier text.
@@ -604,13 +626,16 @@ export class WebChatAdapter {
             }
           },
         } : {}),
-        ...(nativeMcp ? { onProgress: publish } : {}),
+        ...(geminiText ? { prepareMessage: info => ({
+          text: composeGemini(info.newConversation || info.reset || !state.contextDelivered ? geminiFullContext : geminiToolUpdate),
+        }) } : {}),
+        ...(streamWeb ? { onProgress: publish } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...((this.settings.site === 'chatgpt' || this.dualReasoning) && !webModel ? { reasoning: options.model === `${this.modelId}-instant` ? 'off' : 'on' } : this.settings.site === 'chatgpt' && webModel ? { webModel } : {}),
       })
       const operation = this.toolScope && isMainChat ? this.toolScope.withSession(baseSessionId, ask, signal, { contextReference, activity }) : ask()
       let result
-      if (nativeMcp) {
+      if (streamWeb) {
         let done = false
         let failure
         const finished = operation.then(value => { result = value }, error => { failure = error }).finally(() => { done = true; const notify = wake; wake = null; notify?.() })
@@ -658,6 +683,10 @@ export class WebChatAdapter {
     if (withTools) {
       const parsed = this.parseReply(reply)
       if (parsed.kind === 'calls' && parsed.calls.length > 0) {
+        if (geminiText && streamStarted) throw new BridgeError('gemini-tool-protocol-conflict', 'Gemini 已流出正文后又返回工具协议；为避免混合执行，未调用任何工具。')
+        const allowed = new Set(tools.map(tool => tool.name))
+        const denied = parsed.calls.find(call => !allowed.has(call.name))
+        if (denied) throw new BridgeError('tool-not-allowed', `网页模型请求了未授权的工具：${denied.name}。未执行任何工具。`)
         let index = 0
         for (const call of parsed.calls) {
           const id = `wb_${Date.now()}_${index}`

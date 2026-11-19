@@ -83,8 +83,8 @@ test('platform defaults keep native navigator settings and the macOS new-chat sh
   assert.equal(SITE_PRESETS.chatgpt.newChatShortcut, process.platform === 'darwin' ? 'Meta+Shift+KeyO' : 'Control+Shift+KeyO')
 })
 
-test('site visibility defaults to ChatGPT and re-enables through config', () => {
-  assert.deepEqual(visibleSites(resolveSettings()), ['chatgpt'])
+test('site visibility defaults to ChatGPT and Gemini; other sites stay opt-in', () => {
+  assert.deepEqual(visibleSites(resolveSettings()), ['chatgpt', 'gemini'])
   const reopened = resolveSettings({ sites: { visible: ['chatgpt', 'bigmodel', 'no-such-site'] } })
   assert.deepEqual(visibleSites(reopened), ['chatgpt', 'bigmodel'])
   assert.deepEqual(visibleSites(resolveSettings({ sites: { visible: [] } })), ['chatgpt'])

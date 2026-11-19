@@ -2,7 +2,7 @@
 
 DSH-WebBridge 是一个 **DSH 网页模型桥接插件**。
 
-它通过受控的 Chrome 浏览器连接已登录的 ChatGPT 网页会话，让 DSH 可以使用网页模型；同时支持把 DSH 工具通过 MCP 桥接给网页模型执行。
+它通过受控的 Chrome 浏览器连接已登录的 ChatGPT 或 Gemini 网页会话，让 DSH 可以使用网页模型。ChatGPT 使用原生 MCP 桥接；Gemini 当前使用受约束的文本工具兼容协议。
 
 示例：
 
@@ -13,6 +13,7 @@ WebBridge 负责浏览器会话、网页消息同步、附件传递、上下文�
 ## 核心能力
 
 - **ChatGPT 网页模型接入**：使用已登录的 ChatGPT 网页会话作为 DSH 的模型入口。
+- **Gemini 网页模型接入（预览）**：提供独立的 DSH Provider、网页会话恢复和受控文本工具调用；真实 Google 账号尚未完成端到端验收。
 - **浏览器会话管理**：每个 DSH 会话使用独立的 Chrome Page。
 - **实时回复同步**：网页生成过程中持续把正文同步回 DSH。
 - **上下文同步**：通过 `dsh_get_context` 获取 DSH 的完整或增量上下文。
@@ -83,6 +84,12 @@ macOS 桌面版也可以使用安装包自带的 DSH runtime：
 
 完整步骤和权限说明见 [ChatGPT 网页版设置](docs/CHATGPT-SETUP.md) 和 [如何获取渠道与 API Key](docs/CHANNEL-AND-API-KEY.md)。
 
+## Gemini 网页版（兼容通道）
+
+默认展示 ChatGPT 与 Gemini 两个站点，Gemini 登录状态为 `ready` 后才出现在 DSH 模型选择器。登录 Google 账号必须由用户本人完成，无需把 Google Cookie 或口令提供给模型。
+
+Gemini 当前依靠网页 DOM 与严格文本工具协议工作，**不是** Google Connected Apps 原生 MCP；动态模型和思考档位选择、Gemini 文件上传仍需真实网页验收，勿直接用于生产写入。配置、权限边界及验收步骤见 [Gemini 网页版 Provider](docs/GEMINI-WEB.md)。
+
 ## 浏览器模式
 
 WebBridge 默认使用无头模式。
@@ -105,7 +112,7 @@ WebBridge 默认使用无头模式。
 3. 点按钮后依次框选：输入框、发送键、回复区、停止键（最后一个可不画），画错点框右上角 ×；
 4. `webbridge_adapter site=<site> annotate=read save=true`，框内元素会被解析成唯一 CSS 选择器并保存到 `~/.dsh/webbridge/adapters/<site>.json`，立即生效。
 
-标注的网格投票与唯一选择器逻辑借自 browser-operator 的同名功能，不需要在 Chrome 里安装任何扩展。当前默认只暴露 ChatGPT（`sites.visible` 配置）。
+标注的网格投票与唯一选择器逻辑借自 browser-operator 的同名功能，不需要在 Chrome 里安装任何扩展。当前默认展示 ChatGPT 和 Gemini 站点（`sites.visible` 配置），其他站点仍需手动启用。
 
 ## 发布包
 
