@@ -31,6 +31,8 @@ export const DEFAULTS = {
   stableSamples: 3,
   /** How long a single browser command may take before it is killed. */
   commandTimeoutMs: 60000,
+  /** Budget for the web model entry control, including a Cloudflare challenge round trip. */
+  modelTriggerTimeoutMs: 45000,
 
   /** Where per-site selectors are persisted (calibration survives restarts). */
   adapterDir: '~/.dsh/webbridge/adapters',
