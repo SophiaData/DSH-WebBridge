@@ -59,11 +59,13 @@ try {
     new Function(`return ${expr}`)
   })
 
-  test('ChatGPT is the only supported site and stale configuration migrates safely', () => {
-    assert.deepEqual(Object.keys(SITE_PRESETS), ['chatgpt'])
+  test('known site presets include Gemini; unknown sites are rejected safely', () => {
+    assert.ok(SITE_PRESETS.chatgpt)
+    assert.ok(SITE_PRESETS.gemini)
     assert.equal(resolveSettings().site, 'chatgpt')
-    assert.equal(resolveSettings({ site: 'deepseek' }).site, 'chatgpt')
-    assert.throws(() => loadAdapter(settings, 'deepseek'), (error) => error.code === 'unknown-site')
+    assert.equal(resolveSettings({ site: 'gemini' }).site, 'gemini')
+    assert.equal(resolveSettings({ site: 'not-a-site' }).site, 'chatgpt')
+    assert.throws(() => loadAdapter(settings, 'not-a-site'), (error) => error.code === 'unknown-site')
     const adapter = loadAdapter(resolveSettings({ adapterDir: tmp + '/none' }), 'chatgpt')
     const expr = buildReasoningStateExpression(adapter)
     assert.ok(expr.includes('Think'))

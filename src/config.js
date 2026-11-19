@@ -25,6 +25,8 @@ export const DEFAULTS = {
 
   /** Reply completion detection. Zero waits until the reply finishes or is stopped. */
   replyTimeoutMs: 0,
+  /** Bounded Gemini DOM reply detection, even when ChatGPT waits indefinitely. */
+  geminiReplyTimeoutMs: 300000,
   pollIntervalMs: 250,
   stableSamples: 3,
   /** How long a single browser command may take before it is killed. */
@@ -46,12 +48,11 @@ export const DEFAULTS = {
     contextWindow: 32000,
   },
 
-  /** Sites exposed in the DSH model menu and the settings page. The full
-   *  preset table stays available to tools and calibration; only ChatGPT has
-   *  the native MCP connector path, so it is the default visible entry.
-   *  Re-enable a site by adding its key here (e.g. ['chatgpt','bigmodel']). */
+  /** Visible sites: ChatGPT uses native MCP; Gemini uses the bounded text
+   *  tool protocol and must pass login plus live-page acceptance. Other site
+   *  presets remain opt-in through this array. */
   sites: {
-    visible: ['chatgpt'],
+    visible: ['chatgpt', 'gemini'],
   },
 
   tunnel: {
@@ -259,14 +260,14 @@ export const SITE_PRESETS = {
   },
   gemini: {
     label: 'Gemini',
-    url: 'https://gemini.google.com/',
+    url: 'https://gemini.google.com/app',
     adapter: {
       inputSelector: 'rich-textarea .ql-editor[contenteditable="true"], rich-textarea [role="textbox"][contenteditable="true"], .input-area [role="textbox"][contenteditable="true"]',
       sendSelector: 'button.send-button, button[aria-label="发送"], button[aria-label="Send message"], button[aria-label="Send"]',
-      messageSelector: 'model-response message-content, model-response .markdown-main-panel, model-response .markdown, model-response',
+      messageSelector: 'model-response',
       streamingSelector: 'button.stop-button, button[aria-label="Stop response"], button[aria-label="停止回答"], button[aria-label="停止"]',
       stripPrompt: false,
-      requireCountGrowth: true,
+      requireCountGrowth: false,
       matchReplyToUserTurn: false,
       verified: false,
       notes: 'Selectors ported from WebAgent gemini-adapter.js; needs network access to Google.',
