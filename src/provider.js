@@ -429,19 +429,26 @@ export class WebChatAdapter {
     if (nativeContext && this.contextAvailable && !this.contextAvailable()) {
       throw new BridgeError('context-tool-unavailable', '桥接插件尚未暴露 dsh_get_context。请在现有 MCP 工具范围中启用该工具并刷新连接，再重试。')
     }
+    const geminiText = isMainChat && this.settings.site === 'gemini'
     const snapshotMessages = nativeContext ? messages : null
     const userMessages = nativeContext
       ? snapshotMessages.filter(directUserMessage).map(message => this.toolScope?.originalMessage?.(baseSessionId, message) || message)
       : allMessages.filter((message) => message.role !== 'system' && message.role !== 'assistant' &&
       !(nativeMcp && String(message.source?.callId || '').startsWith('wb_mcp_')) &&
       (flattenMessages([message]) || this.toolScope?.hasAttachments?.(baseSessionId, message)))
-    const userKeys = nativeContext ? userMessages.map(message => `${message.id || ''}:${digest(message.content)}`) : []
+    const userKeys = nativeContext || geminiText ? userMessages.map(message => `${message.id || ''}:${digest(message.content)}`) : []
     let delta = state.bootstrapped ? userMessages.slice(state.sentMessages) : userMessages.slice(-1)
-    if (nativeContext && state.bootstrapped) {
+    if ((nativeContext || geminiText) && state.bootstrapped) {
       let common = 0
       while (common < userKeys.length && common < state.sentUserKeys.length && userKeys[common] === state.sentUserKeys[common]) common++
       delta = common === state.sentUserKeys.length ? userMessages.slice(common)
         : userKeys.length && userKeys.at(-1) !== state.sentUserKeys.at(-1) ? userMessages.slice(-1) : []
+    }
+    // A submitted Gemini turn is already visible in the remote conversation.
+    // Do not resubmit it if DSH retries after waiting for the reply failed.
+    if (geminiText && state.bootstrapped && delta.length === 0) {
+      throw new BridgeError('gemini-turn-already-submitted',
+        '本轮 Gemini 消息已经发出，不能自动重发以免重复调用工具。请检查原网页会话，或发送新的明确指令。')
     }
     // Auxiliary tasks need their system instructions and complete input on
     // every request; they do not receive the main chat's context notice.
@@ -454,7 +461,6 @@ export class WebChatAdapter {
     if (!prompt.trim() && !nativeContext) {
       throw new BridgeError('empty-message', `[${this.providerId}] No message text remains after removing DSH context reminders.`)
     }
-    const geminiText = isMainChat && this.settings.site === 'gemini'
     const maxChars = Number(this.settings.providers?.maxPromptChars) || (geminiText ? 32000 : 12000)
     if (prompt.length > maxChars) {
       if (geminiText) throw new BridgeError('gemini-prompt-too-large', `Gemini 网页输入超过 ${maxChars} 字符；为避免截断工具参数，请缩小本轮输入。`)
@@ -574,8 +580,8 @@ export class WebChatAdapter {
       submittedState = { ...submittedState, ...submitted }
       state.bootstrapped = true
       state.sentMessages = userMessages.length
-      if (nativeContext) state.sentUserKeys = userKeys
-      else state.contextDelivered = !attachment || submittedState.contextAttachmentDelivered !== false
+      if (nativeContext || geminiText) state.sentUserKeys = userKeys
+      if (!nativeContext) state.contextDelivered = !attachment || submittedState.contextAttachmentDelivered !== false
       if (withTools && state.contextDelivered) state.toolContext = toolContext
     }
     try {

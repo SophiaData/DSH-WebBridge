@@ -25,6 +25,8 @@ export const DEFAULTS = {
 
   /** Reply completion detection. Zero waits until the reply finishes or is stopped. */
   replyTimeoutMs: 0,
+  /** Bounded Gemini DOM reply detection, even when ChatGPT waits indefinitely. */
+  geminiReplyTimeoutMs: 300000,
   pollIntervalMs: 250,
   stableSamples: 3,
   /** How long a single browser command may take before it is killed. */

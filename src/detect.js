@@ -63,7 +63,11 @@ export async function readReplyState(driver, adapter, signal) {
  */
 export async function waitForReply({ driver, adapter, baseline, settings, signal, log, expectedText, expectedTurnKey, onProgress, onReconnect, activity }) {
   const started = Date.now()
-  const timeoutMs = Number(settings.replyTimeoutMs) || 0
+  // ChatGPT may use unlimited waits. Gemini DOM is not a native MCP stream:
+  // bound its reply-detection failure path when the global timeout is disabled.
+  const timeoutMs = Number(settings.replyTimeoutMs) > 0
+    ? Number(settings.replyTimeoutMs)
+    : adapter.site === 'gemini' ? (Number(settings.geminiReplyTimeoutMs) > 0 ? Number(settings.geminiReplyTimeoutMs) : 300000) : 0
   const deadline = timeoutMs > 0 ? started + timeoutMs : Infinity
   const pollMs = Math.max(1, Number(settings.pollIntervalMs) || 250)
   const stableSamples = Math.max(1, Number(settings.stableSamples) || 3)
@@ -146,8 +150,11 @@ export async function waitForReply({ driver, adapter, baseline, settings, signal
     // don't accept a stale response while a new prompt is being submitted.
     const geminiNewQuery = adapter.site === 'gemini' && expected && state.userTurnKey &&
       state.userTurnKey !== baseline?.userTurnKey && normalize(state.userText) === expected
+    const geminiReplyChanged = Boolean(state.replyId && state.replyId !== baseline?.replyId) ||
+      Boolean(state.replyTurnKey && state.replyTurnKey !== baseline?.replyTurnKey)
+    const geminiStreamSettled = sawStreaming && !state.streaming && state.completed
     const reachedNow = adapter.site === 'gemini'
-      ? Boolean(geminiNewQuery && (grown || changed))
+      ? Boolean(geminiNewQuery && (grown || changed || geminiReplyChanged || geminiStreamSettled))
       : adapter.matchReplyToUserTurn
         ? Boolean(newUserTurn && state.replyTurnKey === currentUserKey && targetMatches)
         : adapter.requireCountGrowth ? grown : grown || changed
@@ -258,7 +265,7 @@ export async function waitForReply({ driver, adapter, baseline, settings, signal
     activity?.emit('reply.timeout', '等待本轮回复超时，未取得可用回复', { timeoutMs, count: lastCount, baselineCount })
     throw new BridgeError(
       'reply-timeout',
-      `No new assistant reply appeared within ${settings.replyTimeoutMs}ms. Check the adapter selectors and whether the message was actually sent.`,
+      `No new assistant reply appeared within ${timeoutMs}ms. Check the adapter selectors and whether the message was actually sent.`,
       { count: lastCount, baselineCount },
     )
   }

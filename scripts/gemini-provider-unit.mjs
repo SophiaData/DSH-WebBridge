@@ -120,6 +120,23 @@ test('Gemini DOM reader returns one answer per model-response, ignores nested th
   assert.equal(busy.completed, false)
 })
 
+test('Gemini DOM identity changes when a virtualized response node is replaced', () => {
+  const expression = buildReadExpression({ ...SITE_PRESETS.gemini.adapter, site: 'gemini' })
+  const page = geminiPage({ replies: ['OK'] })
+  const first = vm.runInNewContext(expression, page)
+  const again = vm.runInNewContext(expression, page)
+  assert.ok(first.replyId)
+  assert.equal(again.replyId, first.replyId, 'same DOM node keeps its identity')
+  const replacement = geminiPage({ replies: ['OK'] }).document.querySelectorAll('model-response')[0]
+  const getOriginal = page.document.querySelectorAll.bind(page.document)
+  page.document.querySelectorAll = selector =>
+    selector === 'model-response' ? [replacement] : getOriginal(selector)
+  const next = vm.runInNewContext(expression, page)
+  assert.equal(next.text, first.text)
+  assert.equal(next.count, first.count)
+  assert.notEqual(next.replyId, first.replyId, 'virtualized answer replacement is recognized')
+})
+
 test('Gemini confirms a submitted user-query before response generation without resending', async () => {
   let draft = 'Hello'
   const newTurn = { count: 1, text: 'Old answer', url: 'https://gemini.google.com/app/1',
@@ -216,4 +233,71 @@ test('Gemini must not turn already-streamed narrative into executable tool calls
   assert.equal((await iterator.next()).value.type, 'block-start')
   assert.equal((await iterator.next()).value.text, 'Let me check.')
   await assert.rejects(iterator.next(), error => error.code === 'gemini-tool-protocol-conflict')
+})
+
+test('Gemini never resends an already submitted turn after reply failure', async () => {
+  const { adapter, sent } = providerFixture(['First answer', 'Second answer'])
+  const initial = [user('question')]
+  await collect(adapter, { sessionId: 'submitted-turn', messages: initial, tools: [tool] })
+  assert.equal(sent.length, 1)
+  await assert.rejects(
+    collect(adapter, { sessionId: 'submitted-turn', messages: initial, tools: [tool] }),
+    error => error.code === 'gemini-turn-already-submitted',
+  )
+  assert.equal(sent.length, 1, 'same request must not be sent a second time')
+  await collect(adapter, { sessionId: 'submitted-turn', messages: [...initial, user('new question')], tools: [tool] })
+  assert.equal(sent.length, 2)
+})
+
+test('Gemini does not trust draft disappearing without an actual new user-query', async () => {
+  const previous = { count: 1, text: 'Old', streaming: true,
+    userTurnKey: 'gemini-q-1', userText: 'Old question' }
+  const driver = { eval: async expression => expression.includes('composerText')
+    ? { result: { composerCount: 1, composerText: '' } }
+    : { result: previous } }
+  const session = new ChatSession({ settings: resolveSettings({ site: 'gemini' }), driver })
+  const result = await session.readSubmission('New question', {
+    ...SITE_PRESETS.gemini.adapter, site: 'gemini',
+  }, { ...previous, streaming: false })
+  assert.equal(result.sent, undefined)
+})
+
+test('Gemini can finish an identical response when the model-response DOM identity changed', async () => {
+  const baseline = { count: 1, text: 'OK', replyId: 'gemini-model-1', replyTurnKey: 'gemini-r-1',
+    userTurnKey: 'gemini-q-1', userText: 'Before', completed: true, generationKnown: true, streaming: false }
+  const current = { ...baseline, replyId: 'gemini-model-2', userTurnKey: 'gemini-q-2', userText: 'Again' }
+  const driver = { eval: async () => ({ result: current }) }
+  const reply = await waitForReply({
+    driver, adapter: { ...SITE_PRESETS.gemini.adapter, site: 'gemini' },
+    baseline, expectedText: 'Again',
+    settings: { replyTimeoutMs: 30, pollIntervalMs: 1, stableSamples: 1, stateDir: '' },
+  })
+  assert.equal(reply.text, 'OK')
+})
+
+test('Gemini only accepts an unchanged response after the new request was seen streaming', async () => {
+  const baseline = { count: 1, text: 'OK', replyId: 'gemini-model-1',
+    userTurnKey: 'gemini-q-1', userText: 'Before', completed: true, generationKnown: true, streaming: false }
+  const current = { ...baseline, userTurnKey: 'gemini-q-2', userText: 'Again' }
+  const states = [{ ...current, streaming: true, completed: false }, current, current, current]
+  let reads = 0
+  const driver = { eval: async () => ({ result: states[Math.min(reads++, states.length - 1)] }) }
+  const reply = await waitForReply({
+    driver, adapter: { ...SITE_PRESETS.gemini.adapter, site: 'gemini' },
+    baseline, expectedText: 'Again',
+    settings: { replyTimeoutMs: 40, pollIntervalMs: 1, stableSamples: 1, stateDir: '' },
+  })
+  assert.equal(reply.text, 'OK')
+})
+
+test('Gemini has finite detection timeout even if global replyTimeoutMs is disabled', async () => {
+  const baseline = { count: 1, text: 'Old', replyId: 'gemini-model-1',
+    userTurnKey: 'gemini-q-1', userText: 'Before', completed: true, generationKnown: true, streaming: false }
+  const stale = { ...baseline, userTurnKey: 'gemini-q-2', userText: 'Again' }
+  const driver = { eval: async () => ({ result: stale }) }
+  await assert.rejects(waitForReply({
+    driver, adapter: { ...SITE_PRESETS.gemini.adapter, site: 'gemini' },
+    baseline, expectedText: 'Again',
+    settings: { replyTimeoutMs: 0, geminiReplyTimeoutMs: 20, pollIntervalMs: 1, stableSamples: 1, stateDir: '' },
+  }), error => error.code === 'reply-timeout')
 })

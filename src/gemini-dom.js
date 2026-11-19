@@ -20,6 +20,11 @@ export function buildGeminiReadExpression() {
     };
     const responses = Array.from(document.querySelectorAll('model-response')).filter(visible);
     const lastResponse = responses.at(-1);
+    // A virtualized Gemini conversation can replace its latest DOM node while
+    // keeping the same visible response count and exact same answer text.
+    const scope = typeof window === 'undefined' ? document : window;
+    const identities = scope.__webbridgeGeminiReplyIds ||= { nodes: new WeakMap(), next: 0 };
+    if (lastResponse && !identities.nodes.has(lastResponse)) identities.nodes.set(lastResponse, 'gemini-model-' + ++identities.next);
     const content = lastResponse?.querySelector?.('message-content, .markdown-main-panel, .markdown') || lastResponse;
     const clean = content?.cloneNode?.(true);
     clean?.querySelectorAll?.('[class*="thought"], [class*="reasoning"], model-thoughts, details').forEach(node => node.remove());
@@ -40,7 +45,7 @@ export function buildGeminiReadExpression() {
       userTurnKey: user ? 'gemini-q-' + queries.length + '-' + hash(userText) : '',
       userText,
       replyTurnKey: lastResponse ? 'gemini-r-' + responses.length : '',
-      replyId: lastResponse?.getAttribute?.('data-id') || ''
+      replyId: lastResponse ? (lastResponse.getAttribute?.('data-id') || identities.nodes.get(lastResponse) || '') : ''
     };
   })()`
 }

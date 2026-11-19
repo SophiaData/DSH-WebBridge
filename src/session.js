@@ -205,7 +205,7 @@ export class ChatSession {
     // send counts as delivered when the draft left the composer and the page
     // reacted: an assistant node appeared, streaming started, or the last
     // reply changed from the pre-send baseline.
-    if (adapter.matchReplyToUserTurn === false) {
+    if (adapter.matchReplyToUserTurn === false && adapter.site !== 'gemini') {
       const draftLeft = !(composer?.composerCount > 0) || normalize(composer.composerText) !== normalize(text)
       const reacted = sent.count > baseline.count || Boolean(sent.streaming) ||
         (Boolean(sent.text) && sent.text !== baseline.text)
