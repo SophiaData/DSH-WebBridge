@@ -21,6 +21,7 @@ export function paidModelKey(modelName, power) {
 /** Read the account's own picker; never infer paid options from API model names. */
 export class ChatgptModels {
   constructor({ settings, driver, log = () => {}, onChange = () => {} }) {
+    this.settings = settings
     this.driver = driver; this.log = log
     this.onChange = onChange
     this.path = join(settings.stateDir, 'model-catalog.json')
@@ -91,19 +92,52 @@ export class ChatgptModels {
     }).finally(() => { this.pending = null })
     return this.pending
   }
+  /** 页面上唯一可见的模型入口；页面尚未渲染时返回 null。 */
+  async findTrigger(page) {
+    for (const selector of TRIGGER_SELECTORS) {
+      try {
+        const trigger = page.locator(selector).filter({ visible: true })
+        if (await trigger.count() === 1) return trigger
+      } catch { /* 页面跳转期间执行上下文会被销毁，下一轮再试 */ }
+    }
+    return null
+  }
+
+  /** Cloudflare 托管挑战会整页替换成人机验证，识别出来等待放行，而不是误报页面改版。 */
+  async challenged(page) {
+    try {
+      return await page.evaluate(() => {
+        const visible = el => el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+        return /just a moment|verify you are human|checking your browser|请稍候|人机验证/i.test(document.title || '')
+          || Boolean(document.querySelector('#challenge-stage, #challenge-running, #challenge-form, #challenge-body-text, [data-testid="captcha"]'))
+          || [...document.querySelectorAll('iframe[src*="challenges.cloudflare.com"], iframe[src*="captcha"]')].some(visible)
+      })
+    } catch { return false }
+  }
+
   async trigger(purpose = '等待 ChatGPT 模型入口') {
     const page = await this.driver.currentPage()
-    const waiting = page.locator(TRIGGER_WAIT).filter({ visible: true })
-    try { await waiting.first().waitFor({ state: 'visible', timeout: 10000 }) }
-    catch {
-      const count = await waiting.count()
-      throw new BridgeError('setup-ui-changed', `${purpose}：预期 1 个控件，实际 ${count} 个（${new URL(page.url()).pathname}）。页面结构可能已变化，尚未执行此步骤。`)
+    const budget = Number(this.settings.modelTriggerTimeoutMs) > 0 ? Number(this.settings.modelTriggerTimeoutMs) : 45000
+    const deadline = Date.now() + budget
+    let sawChallenge = false
+    for (;;) {
+      const trigger = await this.findTrigger(page)
+      if (trigger && !await this.challenged(page)) return trigger
+      if (Date.now() >= deadline) break
+      if (!sawChallenge && await this.challenged(page)) {
+        sawChallenge = true
+        this.log('[webbridge:models] 检测到 Cloudflare 人机验证页，等待页面自动恢复')
+      }
+      await new Promise(resolve => setTimeout(resolve, 500))
     }
-    for (const selector of TRIGGER_SELECTORS) {
-      const trigger = page.locator(selector).filter({ visible: true })
-      if (await trigger.count() === 1) return trigger
+    let count = 0
+    try { count = await page.locator(TRIGGER_WAIT).filter({ visible: true }).count() } catch {}
+    const state = typeof this.driver.state === 'function' ? await this.driver.state(page).catch(() => null) : null
+    if (sawChallenge || state?.manualAuth?.required) {
+      const kind = sawChallenge || state?.manualAuth?.kind === 'verification' ? 'verification' : (state?.manualAuth?.kind || 'login')
+      const hint = kind === 'verification' ? '请在可见浏览器中完成人机验证后重试本轮。' : '请先在可见浏览器中完成登录后重试本轮。'
+      throw new BridgeError(`auth-required:${kind}`, `${purpose}：ChatGPT 页面被 Cloudflare 人机验证拦截，${Math.round(budget / 1000)} 秒内没有恢复出模型入口（${new URL(page.url()).pathname}）。${hint}`, { kind, reasons: ['verification-page'], headed: true })
     }
-    const count = await waiting.count()
     throw new BridgeError('setup-ui-changed', `${purpose}：预期 1 个控件，实际 ${count} 个（${new URL(page.url()).pathname}）。页面结构可能已变化，尚未执行此步骤。`)
   }
   async open() {

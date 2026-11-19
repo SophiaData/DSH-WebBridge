@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { WebChatAdapter } from '../src/provider.js'
-import { paidModelKey } from '../src/models/chatgpt.js'
+import { ChatgptModels, paidModelKey } from '../src/models/chatgpt.js'
 
 const choice = (name, power, label) => ({ key: paidModelKey(name, power), modelName: name, power, label })
 function fixture(catalog, tier = 'paid') {
@@ -67,4 +70,21 @@ test('cancelling metadata resolution does not wait for a slow browser catalog', 
   const pending = adapter.prepareCall('webbridge-chatgpt', 'chatgpt-web-paid-delayed-1', abort.signal)
   abort.abort(new Error('cancelled catalog lookup'))
   await assert.rejects(pending, /cancelled catalog lookup/)
+})
+
+test('a Cloudflare challenge during model selection asks for verification instead of claiming the page changed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wb-model-challenge-'))
+  try {
+    const page = {
+      url: () => 'https://chatgpt.com/c/challenged',
+      evaluate: async () => true,
+      locator: () => { const chain = { filter: () => chain, first: () => chain, count: async () => 0 }; return chain },
+    }
+    const driver = {
+      currentPage: async () => page,
+      state: async () => ({ url: 'https://chatgpt.com/c/challenged', manualAuth: { required: false } }),
+    }
+    const models = new ChatgptModels({ settings: { stateDir: root, modelTriggerTimeoutMs: 100 }, driver })
+    await assert.rejects(() => models.trigger(), error => error.code === 'auth-required:verification' && error.details?.headed === true)
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
