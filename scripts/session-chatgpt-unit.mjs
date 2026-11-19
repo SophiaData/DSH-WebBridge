@@ -347,6 +347,23 @@ test('a user edit after clicking send is preserved instead of being overwritten 
   assert.deepEqual(released, [])
 })
 
+test('an empty composer with the message visible in a new user turn is accepted even when the scraped user text differs', async () => {
+  // Reproduces message-send-uncertain: the ChatGPT turn node exists (brand-new
+  // userTurnKey) but its scraped userText is a sanitized/divergent form (e.g.
+  // image placeholder), while the composer has already leaked the whole draft
+  // back as visible text. The send landed and must not be reported uncertain.
+  const { session, driver } = fixture()
+  driver.eval = async expression => {
+    if (expression.includes('composerText')) return { result: { composerCount: 1, composerText: 'SHORT_PROMPT' } }
+    return { result: { count: 5, text: 'partial reply', streaming: false,
+      url: 'https://chatgpt.com/c/previous', userTurnKey: 'fresh-turn-key',
+      userText: 'different rendered prompt [image]', replyTurnKey: 'fresh-turn-key', replyId: 'fresh-turn-key' } }
+  }
+  const baseline = { userTurnKey: 'previous-turn-key', count: 4, text: 'old reply', url: 'https://chatgpt.com/c/previous' }
+  const state = await session.readSubmission('SHORT_PROMPT', session.adapter(), baseline)
+  assert.ok(state.sent, 'expected sent, got ' + JSON.stringify(state))
+})
+
 test('transient page reads after sending recover the receipt without another click', async () => {
   const { session, driver, submitted, filled } = fixture()
   session.settings.commandTimeoutMs = 300
