@@ -88,3 +88,18 @@ test('a Cloudflare challenge during model selection asks for verification instea
     await assert.rejects(() => models.trigger(), error => error.code === 'auth-required:verification' && error.details?.headed === true)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
+
+test('localized effort labels do not fail model selection', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'wb-model-locale-'))
+  try {
+    const driver = { currentPage: async () => ({ keyboard: { press: async () => {} } }) }
+    const models = new ChatgptModels({ settings: { stateDir: root }, driver })
+    models.chooseModel = async () => {}
+    models.power = async () => {}
+    models.read = async () => ({ modelName: 'GPT-6', power: 2, label: '高', effort: 'high' })
+    const selected = await models.select({ modelName: 'GPT-6', power: 2, label: 'High', effort: 'high' })
+    assert.equal(selected.label, '高')
+    models.read = async () => ({ modelName: 'GPT-6', power: 2, label: 'High', effort: 'medium' })
+    await assert.rejects(() => models.select({ modelName: 'GPT-6', power: 2, label: 'High', effort: 'high' }), error => error.code === 'model-not-selected')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

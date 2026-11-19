@@ -117,13 +117,16 @@ test('ChatGPT sessions get distinct conversations and resume their original conv
   assert.equal(session.conversations.get('chatgpt:A')?.url, urlA)
 })
 
-test('a DSH conversation releases its browser page after the reply while retaining its address', async () => {
+test('a successful DSH round keeps its browser page for the next turn while failures still release it', async () => {
   const { session } = fixture()
   const released = []
   session.driver.releasePage = async key => { released.push(key) }
-  await session.ask('完成后关闭页面', { sessionKey: 'task-A' })
-  assert.deepEqual(released, ['chatgpt:task-A'])
+  await session.ask('完成后保留页面', { sessionKey: 'task-A' })
+  assert.deepEqual(released, [])
   assert.ok(session.conversations.get('chatgpt:task-A').url)
+  session.driver.fillLong = async () => { throw new Error('composer vanished') }
+  await assert.rejects(session.ask('第二轮', { sessionKey: 'task-A' }))
+  assert.deepEqual(released, ['chatgpt:task-A'])
 })
 
 test('a first ChatGPT request starts a new conversation when another site was active', async () => {
