@@ -12,6 +12,11 @@
 
 export function defineTool(definition) {
   const parameters = definition.parameters || {}
+  // The registry projects `parameters` to providers verbatim, so it must be a
+  // real JSON Schema: a flat DSL map leaks `required: true` into the schema and
+  // a DSL property literally named `type` becomes the root `type` keyword, which
+  // strict providers reject ("Invalid schema for function ...").
+  const schema = dslToJsonSchema(parameters)
   const userExecute = definition.execute
 
   const validate = (args) => {
@@ -35,6 +40,7 @@ export function defineTool(definition) {
 
   return {
     ...definition,
+    parameters: schema,
     async execute(args, exec) {
       const violations = validate(args)
       if (violations.length > 0) {
