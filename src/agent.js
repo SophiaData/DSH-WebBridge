@@ -126,6 +126,20 @@ function tryJson(text) {
 }
 
 /**
+ * A registry schema is either a full JSON Schema or the plugin's flat DSL map.
+ * Normalize both so tool hints and required-name derivation stay correct after
+ * host registration starts projecting JSON Schema.
+ */
+function parameterEntries(definition) {
+  const source = definition?.parameters || {}
+  const isJsonSchema = source?.type === 'object' && source.properties && typeof source.properties === 'object'
+  return {
+    entries: isJsonSchema ? Object.entries(source.properties) : Object.entries(source),
+    requiredNames: isJsonSchema && Array.isArray(source.required) ? source.required : null,
+  }
+}
+
+/**
  * Nexus-style meta tools: instead of injecting every tool schema into the web
  * chat prompt, expose two stable tools and let the model discover what it needs.
  *
@@ -161,16 +175,20 @@ export function createMetaTools(catalog) {
         )
       })
       .slice(0, 8)
-      .map((definition) => ({
-        name: definition.name,
-        description: String(definition.description || '').split('\n')[0].slice(0, 120),
-        parameters: Object.fromEntries(
-          Object.entries(definition.parameters || {}).map(([key, spec]) => [
+      .map((definition) => {
+        const { entries, requiredNames } = parameterEntries(definition)
+        return {
+          name: definition.name,
+          description: String(definition.description || '').split('\n')[0].slice(0, 120),
+          parameters: Object.fromEntries(entries.map(([key, spec]) => [
             key,
-            { type: spec?.type || 'string', required: Boolean(spec?.required) },
-          ]),
-        ),
-      }))
+            {
+              type: spec?.type || 'string',
+              required: requiredNames ? requiredNames.includes(key) : Boolean(spec?.required),
+            },
+          ])),
+        }
+      })
   }
 
   const execute = async (call, execReal) => {
@@ -214,11 +232,11 @@ export function normalizeCall(call, toolDefs) {
   if (keys.length !== 1 || keys[0] !== '__scalar') return call
 
   const definition = toolDefs.find((entry) => entry.name === call.name)
-  const parameters = definition?.parameters || {}
-  const required = Object.entries(parameters)
-    .filter(([, spec]) => spec?.required)
+  const { entries, requiredNames } = parameterEntries(definition)
+  const required = entries
+    .filter(([key, spec]) => requiredNames ? requiredNames.includes(key) : Boolean(spec?.required))
     .map(([key]) => key)
-  const all = Object.keys(parameters)
+  const all = entries.map(([key]) => key)
   const target = required.length === 1 ? required[0] : all.length === 1 ? all[0] : null
   if (!target) return call
   return { ...call, arguments: { [target]: args.__scalar } }
