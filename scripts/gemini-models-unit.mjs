@@ -16,7 +16,8 @@ function driverFixture() {
     eval: async expression => {
       evaluations.push(expression)
       if (expression.includes('const trigger')) return { result: { label: current } }
-      if (expression.includes('思考等级')) return { result: false }
+      if (expression.includes("includes('思考等级')")) return { result: true }
+      if (expression.includes('思考等级') && expression.includes('innerText')) return { result: '中' }
       if (expression.includes('.some(menu => menu.querySelectorAll')) return { result: true }
       if (expression.includes('const menus = Array.from')) return { result: [
         { name: '自动', sublabel: '根据需求调整回答', testId: 'mode-auto', selected: false, index: 0, reasoning: [{ power: 0, label: '低' }, { power: 1, label: '中' }, { power: 2, label: '高' }] },
@@ -59,6 +60,19 @@ test('GeminiModels refuses an unavailable mode', async () => {
     () => models.select({ modelName: 'Unknown' }),
     error => error.code === 'model-unavailable',
   )
+})
+
+test('GeminiModels applies reasoning effort from the selected level', async () => {
+  const { driver, clicks } = driverFixture()
+  const models = new GeminiModels({ settings: {}, driver })
+  const catalog = await models.list(true)
+  driver.locator = () => ({
+    evaluateAll: () => 1,
+    nth: () => ({ click: async () => clicks.push('reasoning:中') }),
+  })
+  const selected = await models.select({ ...catalog[1], power: 1 })
+  assert.equal(selected.power, 1)
+  assert.ok(clicks.includes('reasoning:中'))
 })
 
 test('Gemini provider advertises mode catalog with stable ids', async () => {

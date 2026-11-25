@@ -150,6 +150,7 @@ export function apply(ctx, config = {}) {
   // Channel strategies: the core never branches on a site name, it dispatches
   // through the registry (src/models/README.md is the contract).
   const modelSources = createModelSources({ settings, driver, log, emit: id => ctx.emit('llm/models-updated', id) })
+  modelSources.gemini?.load?.().catch(error => log(`[webbridge:models] gemini cache load failed: ${error.message}`))
   const models = modelSources.chatgpt
   const session = new ChatSession({ settings, driver, log, modelControl: models })
   const ops = createOps({ settings, driver, session, log })

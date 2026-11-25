@@ -1,6 +1,7 @@
 import { ChatgptModels } from './chatgpt.js'
 import { BigmodelTrialModels } from './bigmodel.js'
 import { GeminiModels } from './gemini.js'
+import { join } from 'node:path'
 
 /**
  * Channel model-source registry (strategy dispatch). The core flow never
@@ -14,7 +15,7 @@ export function createModelSources({ settings, driver, log, emit }) {
   const sources = {
     chatgpt: new ChatgptModels({ settings, driver, log, onChange: onChangeFor('chatgpt') }),
     bigmodel: new BigmodelTrialModels({ settings, driver, log, onChange: onChangeFor('bigmodel') }),
-    gemini: new GeminiModels({ settings, driver, log, onChange: onChangeFor('gemini') }),
+    gemini: new GeminiModels({ settings: { ...settings, providers: { ...(settings.providers || {}), geminiCatalogPath: join(settings.stateDir || '~/.dsh/webbridge', 'gemini-catalog.json') } }, driver, log, onChange: onChangeFor('gemini') }),
   }
   return sources
 }

@@ -271,8 +271,8 @@ export class WebChatAdapter {
     if ((this.settings.site === 'chatgpt' && tier === 'free') || this.dualReasoning) {
       this.paidCatalog = []
       return [
-        { provider, id: this.modelId, name: `${this.displayName}（思考）`, contextWindow: this.settings.providers?.contextWindow || 32000, supportsTools: true, inputModalities: ['text', 'image'] },
-        { provider, id: `${this.modelId}-instant`, name: `${this.displayName}（非思考）`, contextWindow: this.settings.providers?.contextWindow || 32000, supportsTools: true, inputModalities: ['text', 'image'] },
+        { provider, id: this.modelId, name: `${this.displayName}（思考）`, context: { contextWindow: this.settings.providers?.contextWindow || 32000 }, inputModalities: ['text', 'image'] },
+        { provider, id: `${this.modelId}-instant`, name: `${this.displayName}（非思考）`, context: { contextWindow: this.settings.providers?.contextWindow || 32000 }, inputModalities: ['text', 'image'] },
       ]
     }
     const choices = this.modelCatalog ? await this.modelCatalog() : []
@@ -288,8 +288,7 @@ export class WebChatAdapter {
         id: this.modelId,
         name: this.displayName,
         description: `${this.displayName}（浏览器驱动，无需 API Key）`,
-        contextWindow: this.settings.providers?.contextWindow || 32000,
-        supportsTools: true,
+        context: { contextWindow: this.settings.providers?.contextWindow || 32000 },
         inputModalities: ['text', 'image'],
       },
     ]
@@ -310,8 +309,15 @@ export class WebChatAdapter {
       signal.addEventListener('abort', aborted, { once: true })
       if (signal.aborted) aborted()
     })]).finally(() => signal.removeEventListener('abort', aborted)) : await catalog
-    const match = choices.find(choice => `${this.modelId}-${paidKey(choice.modelName)}` === model || `${this.modelId}-${choice.key}` === model)
+    const suffix = model.slice(prefix.length)
+    const match = this.settings.site === 'gemini'
+      ? choices.find(choice => choice.key === suffix || `${this.modelId}-${choice.key}` === model)
+      : choices.find(choice => `${this.modelId}-${paidKey(choice.modelName)}` === model || `${this.modelId}-${choice.key}` === model)
     if (!match) throw new BridgeError('model-unavailable', '所选网页模型或思考档位已不可用，请刷新模型列表。')
+    if (this.settings.site === 'gemini') {
+      const levels = Array.isArray(match.reasoning) && match.reasoning.length ? match.reasoning : []
+      return { modelName: match.modelName, choice: match, choices: levels, legacyPower: match.preferred ? (levels.find(level => level.preferred) || levels[0])?.power : undefined }
+    }
     return { modelName: match.modelName, choices: choices.filter(choice => choice.modelName === match.modelName).map(choice => ({ ...choice })), legacyPower: `${this.modelId}-${match.key}` === model ? match.power : undefined }
   }
 
@@ -427,8 +433,11 @@ export class WebChatAdapter {
       return
     }
     const selected = preparedSelection === undefined ? await this.selectionFor(options.model, options.signal) : preparedSelection
-    const webModel = selected && (options.reasoningEffort ? selected.choices.find(level => `web-${level.power}` === options.reasoningEffort) : selected.choices.find(level => level.power === selected.legacyPower) || selected.choices.find(level => level.preferred) || selected.choices[0])
-    if (selected && !webModel) throw new BridgeError('reasoning-unavailable', '请选择推理等级，当前网页不支持所选档位。')
+    const selectedEffort = selected && (options.reasoningEffort ? selected.choices.find(level => `web-${level.power}` === options.reasoningEffort) : selected.choices.find(level => level.power === selected.legacyPower) || selected.choices.find(level => level.preferred) || selected.choices[0])
+    const webModel = this.settings.site === 'gemini'
+      ? { ...(selected?.choice || {}), power: selectedEffort?.power ?? selected?.legacyPower ?? 0, label: selectedEffort?.label || selected?.choice?.label }
+      : selectedEffort
+    if (selected && selected.choices?.length && !selectedEffort) throw new BridgeError('reasoning-unavailable', '请选择推理等级，当前网页不支持所选档位。')
     // Native ChatGPT reads the effective DSH input through MCP. The composer
     // carries only the bootstrap reference and new user input. Other routes
     // retain their existing text-attachment transport.
@@ -651,7 +660,7 @@ export class WebChatAdapter {
         ...(streamWeb ? { onProgress: publish } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...((this.settings.site === 'chatgpt' || this.dualReasoning) && !webModel ? { reasoning: options.model === `${this.modelId}-instant` ? 'off' : 'on' } : this.settings.site === 'chatgpt' && webModel ? { webModel } : {}),
-        ...(geminiText && selected ? { webModel: { ...webModel, modelName: selected.modelName } } : {}),
+        ...(geminiText && selected ? { webModel } : {}),
       })
       const operation = this.toolScope && isMainChat ? this.toolScope.withSession(baseSessionId, ask, signal, { contextReference, activity }) : ask()
       let result

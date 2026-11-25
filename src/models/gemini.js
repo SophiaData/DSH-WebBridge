@@ -1,4 +1,6 @@
 import { BridgeError } from '../envelope.js'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 
 const MODE_TRIGGER = '[data-test-id="bard-mode-menu-button"]'
 const MODE_MENU = '[data-test-id="gem-mode-menu"], [data-test-id="bard-mode-desktop-gem-menu"]'
@@ -73,6 +75,29 @@ export class GeminiModels {
     this.catalog = []
     this.checkedAt = 0
     this.reasoningAvailable = false
+    const configured = settings?.providers?.geminiCatalogPath
+    this.path = configured ? resolve(configured) : null
+    this.loaded = false
+  }
+
+  async load() {
+    if (this.loaded || !this.path) return
+    this.loaded = true
+    try {
+      const saved = JSON.parse(await readFile(this.path, 'utf8'))
+      if (Array.isArray(saved.models) && saved.models.length) {
+        this.catalog = saved.models
+        this.checkedAt = Number(saved.checkedAt) || 0
+      }
+    } catch {}
+  }
+
+  async persist() {
+    if (!this.path || !this.catalog.length) return
+    try {
+      await mkdir(dirname(this.path), { recursive: true })
+      await writeFile(this.path, JSON.stringify({ version: 1, checkedAt: this.checkedAt, models: this.catalog }, null, 2), { mode: 0o600 })
+    } catch {}
   }
 
   async currentName() {
@@ -131,6 +156,7 @@ export class GeminiModels {
   }
 
   async list(force = false) {
+    await this.load()
     if (!force && Date.now() - this.checkedAt < 300000 && this.catalog.length) return this.catalog
     const operation = async () => {
       try {
@@ -157,6 +183,7 @@ export class GeminiModels {
           Promise.resolve().then(() => this.onChange()).catch(() => this.log('[webbridge:models] gemini model-change notification failed'))
         }
         this.checkedAt = Date.now()
+        await this.persist()
         return this.catalog
       } catch (error) {
         this.checkedAt = Date.now()
