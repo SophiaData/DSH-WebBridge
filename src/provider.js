@@ -320,7 +320,7 @@ export class WebChatAdapter {
       provider,
       id: model,
       name: choice ? choice.modelName : (this.settings.site === 'chatgpt' || this.dualReasoning) ? `${this.displayName}（${model === `${this.modelId}-instant` ? '非思考' : this.paidCatalog?.length ? '网页当前设置' : '思考'}）` : this.displayName,
-      ...(choice ? { reasoning: { efforts: choice.choices.map(level => ({ id: `web-${level.power}`, name: level.label })), defaultEffort: `web-${(choice.choices.find(level => level.power === choice.legacyPower) || choice.choices.find(level => level.preferred) || choice.choices[0]).power}` } } : {}),
+      ...(choice && choice.choices?.length ? { reasoning: { efforts: choice.choices.map(level => ({ id: `web-${level.power}`, name: level.label })), defaultEffort: `web-${(choice.choices.find(level => level.power === choice.legacyPower) || choice.choices.find(level => level.preferred) || choice.choices[0]).power}` } } : {}),
       ...(this.settings.site === 'gemini' && choice ? { description: `${this.displayName} · ${choice.modelName}` } : {}),
       contextWindow: this.settings.providers?.contextWindow || 32000,
       supportsTools: true,
@@ -645,6 +645,7 @@ export class WebChatAdapter {
         ...(streamWeb ? { onProgress: publish } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...((this.settings.site === 'chatgpt' || this.dualReasoning) && !webModel ? { reasoning: options.model === `${this.modelId}-instant` ? 'off' : 'on' } : this.settings.site === 'chatgpt' && webModel ? { webModel } : {}),
+        ...(geminiText && selected ? { webModel: { ...webModel, modelName: selected.modelName } } : {}),
       })
       const operation = this.toolScope && isMainChat ? this.toolScope.withSession(baseSessionId, ask, signal, { contextReference, activity }) : ask()
       let result

@@ -4,6 +4,11 @@ const MODE_TRIGGER = '[data-test-id="bard-mode-menu-button"]'
 const MODE_MENU = '[data-test-id="gem-mode-menu"], [data-test-id="bard-mode-desktop-gem-menu"]'
 const REASONING_ITEM = '思考等级'
 const GEMINI_URL = 'https://gemini.google.com/app'
+const REASONING_LEVELS = [
+  { label: '低', description: '快速、高效', power: 0 },
+  { label: '中', description: '深度适中', power: 1 },
+  { label: '高', description: '超级详尽', power: 2 },
+]
 
 const READ_EXPRESSION = `(() => {
   const trigger = document.querySelector('${MODE_TRIGGER}');
@@ -29,6 +34,18 @@ const REASONING_EXPRESSION = `(() => {
   const items = Array.from(document.querySelectorAll('${MODE_MENU} [role="menuitemradio"]'));
   const reasoning = items.find(el => ((el.innerText || el.textContent || '').trim() || '').includes('${REASONING_ITEM}'));
   return Boolean(reasoning);
+})()`
+
+const READ_REASONING_EXPRESSION = `(() => {
+  const text = el => ((el.innerText || el.textContent || '').trim() || '').replace(/\\s+/g, ' ');
+  const menus = Array.from(document.querySelectorAll('${MODE_MENU}'));
+  const root = menus.find(menu => menu.getAttribute('data-test-id') === 'gem-mode-menu') || menus[0];
+  if (!root) return '';
+  const options = Array.from(root.querySelectorAll('[role="menuitemradio"]'))
+    .map(el => text(el))
+    .filter(value => /^(低|中|高)[\\s　]/.test(value));
+  const selected = options.find(value => /\\bselected\\b/.test(value)) || options[0] || '';
+  return selected.split(' ')[0];
 })()`
 
 const MENU_EXPRESSION = `(() => Array.from(document.querySelectorAll('${MODE_MENU}')).some(menu => menu.querySelectorAll('[role="menuitemradio"]').length > 0))()`
@@ -65,6 +82,19 @@ export class GeminiModels {
     } catch (error) {
       this.log(`[webbridge:models] gemini mode label read failed: ${error.message}`)
       return 'Gemini'
+    }
+  }
+
+  async currentReasoningLevel() {
+    try {
+      await this.openMenu()
+      const { result } = await this.driver.eval(READ_REASONING_EXPRESSION)
+      return String(result || '低').trim()
+    } catch (error) {
+      this.log(`[webbridge:models] gemini reasoning level read failed: ${error.message}`)
+      return '低'
+    } finally {
+      await this.closeMenu().catch(() => {})
     }
   }
 
@@ -107,7 +137,8 @@ export class GeminiModels {
         const modes = await this.readMenu()
         if (!modes.length) return this.catalog
         const current = await this.currentName()
-        const catalog = modes.map((mode, index) => {
+        const modeItems = modes.filter(mode => !/^(低|中|高)[\s　]/.test(String(mode.name || '')))
+        const catalog = modeItems.map((mode, index) => {
           const modelName = mode.name || parseModeLabel(mode.sublabel)
           return {
           key: `mode-${index}`,
@@ -118,6 +149,7 @@ export class GeminiModels {
             preferred: mode.selected || (!modes.some(item => item.selected) && Boolean(current && sameMode(modelName, current))),
             testId: mode.testId,
             index,
+            reasoning: REASONING_LEVELS.map(level => ({ ...level })),
           }
         })
         if (JSON.stringify(catalog.map(item => [item.modelName, item.label, item.preferred])) !== JSON.stringify(this.catalog.map(item => [item.modelName, item.label, item.preferred]))) {
@@ -145,10 +177,24 @@ export class GeminiModels {
     await this.openMenu()
     try {
       await this.driver.click(`${MODE_MENU} [role="menuitemradio"] >> nth=${match.index}`)
+      const requestedPower = Number(choice.power)
+      if (Number.isInteger(requestedPower)) {
+        const level = REASONING_LEVELS.find(item => item.power === requestedPower)
+        if (level) {
+          await this.driver.click(`${MODE_MENU} gem-menu-item[role="menuitem"]:has-text("${REASONING_ITEM}")`)
+          const options = this.driver.locator?.('[role="menuitemradio"]')
+          if (options) {
+            const index = await options.evaluateAll(nodes => nodes.findIndex(node => ((node.innerText || '').trim() || '').startsWith(level.label)))
+            if (index >= 0) await options.nth(index).click()
+          } else {
+            await this.driver.click(`[role="menuitemradio"]:has-text("${level.label}")`)
+          }
+        }
+      }
       await this.closeMenu()
       const selected = parseModeLabel(await this.currentName())
       if (!sameMode(selected, match.modelName) && !sameMode(selected, match.label)) throw new BridgeError('model-not-selected', `未能将 Gemini 模式切换为 ${match.modelName}。`)
-      return { ...match, label: match.label }
+      return { ...match, power: Number.isInteger(requestedPower) ? requestedPower : 0, label: match.label }
     } catch (error) {
       await this.closeMenu().catch(() => {})
       throw error
