@@ -600,12 +600,13 @@ export class WebChatAdapter {
       const publish = ({ text }) => {
         // Tool envelopes are emitted as DSH tool-call blocks after completion.
         // Do not leak a partial Gemini protocol prefix as a text block first.
-        if (geminiText && String(text).trimStart().startsWith('<')) return
+        const progressText = String(text)
+        if (geminiText && /<<</.test(progressText)) return
         // Do not persist an uninitialized answer as a partial assistant message
         // if the web model ignores bootstrap. Progress snapshots are cumulative;
         // the next update (or final reply) still contains this earlier text.
         if (contextReference && !this.contextStore.isDelivered(contextReference.context_id)) return
-        nextText = streamPreview(text)
+        nextText = streamPreview(geminiText ? progressText.replace(/<<<[^>]*>>>?/g, '') : progressText)
         const notify = wake
         wake = null
         notify?.()

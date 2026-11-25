@@ -3,6 +3,15 @@ const CALLS_OPEN = '<<<TOOL_CALLS>>>'
 const CALLS_CLOSE = '<<<END_TOOL_CALLS>>>'
 const FINAL_OPEN = '<<<FINAL>>>'
 const FINAL_CLOSE = '<<<END_FINAL>>>'
+const FINAL_OPEN_FALLBACK = '<<<'
+
+function cleanFinal(text) {
+  let value = String(text ?? '').trim()
+  if (value.startsWith('<<<FINAL>>>')) value = value.slice('<<<FINAL>>>'.length)
+  else if (value.startsWith('<<<')) value = value.slice(3)
+  if (value.endsWith(FINAL_CLOSE)) value = value.slice(0, -FINAL_CLOSE.length)
+  return value.trim()
+}
 
 function failure(message) {
   const error = new Error('gemini-tool-protocol: ' + message)
@@ -15,6 +24,9 @@ export function parseGeminiReply(reply) {
   const text = String(reply ?? '').trim()
   if (text.startsWith(FINAL_OPEN) && text.endsWith(FINAL_CLOSE)) {
     return { kind: 'final', text: text.slice(FINAL_OPEN.length, -FINAL_CLOSE.length).trim() }
+  }
+  if (text.startsWith(FINAL_OPEN_FALLBACK) && text.includes(FINAL_CLOSE)) {
+    return { kind: 'final', text: cleanFinal(text) }
   }
   if (!text.startsWith(CALLS_OPEN)) return { kind: 'text', text }
   if (!text.endsWith(CALLS_CLOSE)) throw failure('tool-call envelope is incomplete')
