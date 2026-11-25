@@ -52,6 +52,7 @@ test('Gemini is visible by default but absent from the catalog until login is re
 test('Gemini parser only accepts explicit complete protocol tool calls', () => {
   assert.deepEqual(parseGeminiReply(calls()), { kind: 'calls', calls: [{ name: 'read', arguments: { path: 'a.txt' } }] })
   assert.deepEqual(parseGeminiReply('<<<FINAL>>>Done<<<END_FINAL>>>'), { kind: 'final', text: 'Done' })
+  assert.deepEqual(parseGeminiReply('<<< 你好！有什么我可以帮你的吗？ <<<END_FINAL>>>'), { kind: 'final', text: '你好！有什么我可以帮你的吗？' })
   assert.deepEqual(parseGeminiReply('Text and ```json\n{"name":"read","arguments":{}}\n```'), { kind: 'text', text: 'Text and ```json\n{"name":"read","arguments":{}}\n```' })
   assert.deepEqual(parseGeminiReply('x ' + calls()), { kind: 'text', text: 'x ' + calls() })
   for (const text of ['<<<TOOL_CALLS>>>[{"name":"read"', '<<<TOOL_CALLS>>>not-json<<<END_TOOL_CALLS>>>', calls('read', []), calls('read', null), calls('invalid name', {})]) {
