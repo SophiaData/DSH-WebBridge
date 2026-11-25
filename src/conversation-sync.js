@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto'
 import { BridgeError } from './envelope.js'
 import { domToMarkdown } from './markdown.js'
 
+function stripProtocolMarkers(text) {
+  let value = String(text ?? '')
+  if (/^<<</.test(value)) value = value.slice(3)
+  if (value.startsWith(' 你好')) value = value.slice(1)
+  return value
+    .replace(/<<<+\s*(?:END_FINAL|END_TOOL_CALLS|END_NEXUS_TOOLS)\s*>>>?$/i, '')
+    .trim()
+}
+
 /** Read visible user and assistant messages from this conversation's DOM. */
 function readWebTurns(serialize) {
   const visible = node => typeof node.checkVisibility !== 'function' ||
@@ -53,7 +62,7 @@ function normalize(text) {
 }
 
 function webUserText(text) {
-  let value = String(text || '').trim()
+  let value = stripProtocolMarkers(text)
   // Historical turns carry the old plugin name; normalize both spellings.
   if (/^调用 (?:WebBridge|Nexus) DSH 的 dsh_get_context，参数为 /.test(value)) {
     const boundary = value.indexOf('\n\n')
@@ -88,7 +97,7 @@ export function planConversationSync(localMessages, webMessages, url) {
   const web = webMessages.map((message, index) => ({
     role: message.role,
     key: message.key || '',
-    text: message.role === 'user' ? webUserText(message.text) : String(message.text || '').trim(),
+    text: message.role === 'user' ? webUserText(message.text) : stripProtocolMarkers(message.text),
     markdown: message.role === 'assistant' ? String(message.markdown || '').trim() : '',
     id: webId(url, message, index),
   })).filter(message => ['user', 'assistant'].includes(message.role) && message.text)
