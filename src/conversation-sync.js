@@ -3,11 +3,10 @@ import { BridgeError } from './envelope.js'
 import { domToMarkdown } from './markdown.js'
 
 function stripProtocolMarkers(text) {
-  let value = String(text ?? '')
-  if (/^<<</.test(value)) value = value.slice(3)
-  if (value.startsWith(' 你好')) value = value.slice(1)
-  return value
-    .replace(/<<<+\s*(?:END_FINAL|END_TOOL_CALLS|END_NEXUS_TOOLS)\s*>>>?$/i, '')
+  return String(text ?? '')
+    .replace(/^<<<+\s*(?:FINAL|TOOL_CALLS|NEXUS_TOOLS)?\s*>>>?\s*/i, '')
+    .replace(/^<<<+\s*/, '')
+    .replace(/<<<+\s*(?:END_FINAL|END_TOOL_CALLS|END_NEXUS_TOOLS)\s*>>>?\s*$/i, '')
     .trim()
 }
 
