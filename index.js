@@ -48,6 +48,15 @@ const TOOLS = [
     parameters: {},
   },
   {
+    name: 'webbridge_models',
+    op: 'models',
+    description: 'List the live web model catalog for one site from that channel strategy, without changing the current conversation.',
+    parameters: {
+      site: { type: 'string', description: 'Site key. Defaults to the configured site.' },
+      force: { type: 'boolean', description: 'Force a fresh refresh from the live page.' },
+    },
+  },
+  {
     name: 'webbridge_open',
     op: 'open',
     description:
@@ -144,6 +153,17 @@ export function apply(ctx, config = {}) {
   const models = modelSources.chatgpt
   const session = new ChatSession({ settings, driver, log, modelControl: models })
   const ops = createOps({ settings, driver, session, log })
+  ops.models = async (args = {}) => {
+    const site = String(args.site || settings.site)
+    const source = modelSourceFor(modelSources, site)
+    if (!source || typeof source.list !== 'function') return { site, models: [] }
+    try {
+      const models = await source.list(Boolean(args.force))
+      return { site, models }
+    } catch (error) {
+      return { site, models: [], error: error?.code || 'model-catalog-failed', message: error?.message || String(error) }
+    }
+  }
   const contextStore = new ContextStore()
   const toolScope = createToolScope(ctx, log, { contextStore })
   const providers = new Map()

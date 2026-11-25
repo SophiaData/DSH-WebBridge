@@ -47,7 +47,7 @@ export const DEFAULTS = {
   /** Web chats registered as DSH model providers. */
   providers: {
     enabled: true,
-    contextWindow: 32000,
+    contextWindow: 1000000,
   },
 
   /** Visible sites: ChatGPT uses native MCP; Gemini uses the bounded text
