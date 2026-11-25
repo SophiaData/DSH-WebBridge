@@ -280,7 +280,7 @@ export class WebChatAdapter {
     if (choices.length) return [...new Set(choices.map(choice => choice.modelName))].map(name => {
       const first = choices.find(choice => choice.modelName === name)
       const idKey = this.settings.site === 'gemini' && first?.key ? first.key : paidKey(name)
-      return this.modelInfo(provider, `${this.modelId}-${idKey}`, { modelName: name, choices: choices.filter(choice => choice.modelName === name) })
+      return this.modelInfo(provider, `${this.modelId}-${idKey}`, { modelName: name, choice: first, choices: choices.filter(choice => choice.modelName === name) })
     })
     return [
       {
@@ -320,10 +320,16 @@ export class WebChatAdapter {
       provider,
       id: model,
       name: choice ? choice.modelName : (this.settings.site === 'chatgpt' || this.dualReasoning) ? `${this.displayName}（${model === `${this.modelId}-instant` ? '非思考' : this.paidCatalog?.length ? '网页当前设置' : '思考'}）` : this.displayName,
-      ...(choice && choice.choices?.length ? { reasoning: { efforts: choice.choices.map(level => ({ id: `web-${level.power}`, name: level.label })), defaultEffort: `web-${(choice.choices.find(level => level.power === choice.legacyPower) || choice.choices.find(level => level.preferred) || choice.choices[0]).power}` } } : {}),
+      ...(choice ? (() => {
+        const levels = choice.choice?.reasoning?.length ? choice.choice.reasoning : choice.choices
+        if (!levels?.length) return {}
+        return { reasoning: {
+          efforts: levels.map(level => ({ id: `web-${level.power}`, name: level.label })),
+          defaultEffort: `web-${(levels.find(level => level.power === choice.legacyPower) || levels.find(level => level.preferred) || levels[0]).power}`,
+        } }
+      })() : {}),
       ...(this.settings.site === 'gemini' && choice ? { description: `${this.displayName} · ${choice.modelName}` } : {}),
-      contextWindow: this.settings.providers?.contextWindow || 32000,
-      supportsTools: true,
+      context: { contextWindow: this.settings.providers?.contextWindow || 32000 },
       inputModalities: ['text', 'image'],
     }
   }

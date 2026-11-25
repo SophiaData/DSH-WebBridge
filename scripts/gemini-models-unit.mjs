@@ -19,16 +19,12 @@ function driverFixture() {
       if (expression.includes('思考等级')) return { result: false }
       if (expression.includes('.some(menu => menu.querySelectorAll')) return { result: true }
       if (expression.includes('const menus = Array.from')) return { result: [
-        { name: '自动', sublabel: '根据需求调整回答', testId: 'mode-auto', selected: false, index: 0 },
-        { name: '日常帮助', sublabel: '4 Hydrogen', testId: 'mode-hydrogen', selected: true, index: 1 },
-        { name: '更深入的分析', sublabel: '4 Neon', testId: 'mode-neon', selected: false, index: 2 },
+        { name: '自动', sublabel: '根据需求调整回答', testId: 'mode-auto', selected: false, index: 0, reasoning: [{ power: 0, label: '低' }, { power: 1, label: '中' }, { power: 2, label: '高' }] },
+        { name: '日常帮助', sublabel: '4 Hydrogen', testId: 'mode-hydrogen', selected: true, index: 1, reasoning: [{ power: 0, label: '低' }, { power: 1, label: '中' }, { power: 2, label: '高' }] },
+        { name: '更深入的分析', sublabel: '4 Neon', testId: 'mode-neon', selected: false, index: 2, reasoning: [{ power: 0, label: '低' }, { power: 1, label: '中' }, { power: 2, label: '高' }] },
       ] }
       if (expression.includes('querySelectorAll(\'[role="menuitemradio"]\')')) {
-        return { result: [
-          { name: '自动', sublabel: '根据需求调整回答', testId: 'mode-auto', selected: false, index: 0 },
-          { name: '日常帮助', sublabel: '4 Hydrogen', testId: 'mode-hydrogen', selected: true, index: 1 },
-          { name: '更深入的分析', sublabel: '4 Neon', testId: 'mode-neon', selected: false, index: 2 },
-        ] }
+        return { result: [] }
       }
       return { result: null }
     },
@@ -80,5 +76,10 @@ test('Gemini provider advertises mode catalog with stable ids', async () => {
     'gemini-web-mode-0', 'gemini-web-mode-1', 'gemini-web-mode-2',
   ])
   assert.equal(advertised[1].name, '日常帮助')
-  assert.equal(advertised[1].contextWindow, 1000000)
+  assert.equal(advertised[1].context.contextWindow, 1000000)
+  assert.deepEqual(advertised[1].reasoning.efforts, [
+    { id: 'web-0', name: '低' },
+    { id: 'web-1', name: '中' },
+    { id: 'web-2', name: '高' },
+  ])
 })
