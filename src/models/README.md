@@ -57,3 +57,5 @@ export class XxxModels {
 - `chatgpt.js` — 参考实现：打开网页模型菜单，逐模型读取名称与思考滑块档位，支持 select。
 - `bigmodel.js` — 智谱体验中心：`?modelCode=` 决定当前模型，目录从 URL 推导；
   页内模型下拉的 DOM 探测（chatgpt.js 的 trigger→open→names 模式）待在真实页面校准后补上。
+- `gemini.js` — Gemini 网页模式菜单：`bard-mode-menu-button` 打开 `gem-mode-menu`，
+  读取 `gem-menu-item[role="menuitemradio"]` 作为模式列表，支持按菜单项切换。

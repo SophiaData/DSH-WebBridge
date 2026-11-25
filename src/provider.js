@@ -277,7 +277,11 @@ export class WebChatAdapter {
     }
     const choices = this.modelCatalog ? await this.modelCatalog() : []
     this.paidCatalog = choices
-    if (choices.length) return [...new Set(choices.map(choice => choice.modelName))].map(name => this.modelInfo(provider, `${this.modelId}-${paidKey(name)}`, { modelName: name, choices: choices.filter(choice => choice.modelName === name) }))
+    if (choices.length) return [...new Set(choices.map(choice => choice.modelName))].map(name => {
+      const first = choices.find(choice => choice.modelName === name)
+      const idKey = this.settings.site === 'gemini' && first?.key ? first.key : paidKey(name)
+      return this.modelInfo(provider, `${this.modelId}-${idKey}`, { modelName: name, choices: choices.filter(choice => choice.modelName === name) })
+    })
     return [
       {
         provider,
@@ -297,7 +301,8 @@ export class WebChatAdapter {
 
   async selectionFor(model, signal) {
     signal?.throwIfAborted()
-    if (!String(model || '').startsWith(`${this.modelId}-paid-`)) return null
+    const prefix = this.settings.site === 'gemini' ? `${this.modelId}-mode-` : `${this.modelId}-paid-`
+    if (!String(model || '').startsWith(prefix)) return null
     const catalog = this.modelCatalog ? this.modelCatalog() : Promise.resolve([])
     let aborted
     const choices = signal ? await Promise.race([catalog, new Promise((_, reject) => {
@@ -316,6 +321,7 @@ export class WebChatAdapter {
       id: model,
       name: choice ? choice.modelName : (this.settings.site === 'chatgpt' || this.dualReasoning) ? `${this.displayName}（${model === `${this.modelId}-instant` ? '非思考' : this.paidCatalog?.length ? '网页当前设置' : '思考'}）` : this.displayName,
       ...(choice ? { reasoning: { efforts: choice.choices.map(level => ({ id: `web-${level.power}`, name: level.label })), defaultEffort: `web-${(choice.choices.find(level => level.power === choice.legacyPower) || choice.choices.find(level => level.preferred) || choice.choices[0]).power}` } } : {}),
+      ...(this.settings.site === 'gemini' && choice ? { description: `${this.displayName} · ${choice.modelName}` } : {}),
       contextWindow: this.settings.providers?.contextWindow || 32000,
       supportsTools: true,
       inputModalities: ['text', 'image'],
