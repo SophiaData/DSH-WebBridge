@@ -49,3 +49,38 @@ export function buildGeminiReadExpression() {
     };
   })()`
 }
+
+/**
+ * Read all visible Gemini turns for conversation sync. The live reply reader
+ * intentionally returns only the last answer; sync needs the whole sequence.
+ */
+export function buildGeminiConversationReadExpression() {
+  return `(() => {
+    const visible = el => typeof el?.checkVisibility !== 'function' ||
+      el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    const serialize = ${domToMarkdown.toString()};
+    const cleanText = node => {
+      if (!node) return '';
+      const plain = String(node.innerText || node.textContent || '').trim();
+      if (!plain) return '';
+      const clone = node.cloneNode(true);
+      clone.querySelectorAll?.('[class*="thought"], [class*="reasoning"], model-thoughts, details').forEach(item => item.remove());
+      return serialize(clone).slice(0, 200000).trim() || plain;
+    };
+    const pairs = [];
+    const queries = Array.from(document.querySelectorAll('user-query')).filter(visible);
+    const responses = Array.from(document.querySelectorAll('model-response')).filter(visible);
+    for (let index = 0; index < Math.max(queries.length, responses.length); index++) {
+      const query = queries[index];
+      const response = responses[index];
+      const lines = Array.from(query?.querySelectorAll?.('.query-text-line') || []);
+      const userText = (lines.length ? lines.map(line => line.textContent || '').join('\\n') : query?.textContent || '').trim();
+      if (userText) pairs.push({ role: 'user', key: 'gemini-q-' + (index + 1) + '-' + userText.length, text: userText });
+      const body = response?.querySelector?.('message-content, .markdown-main-panel, .markdown') || response;
+      const text = cleanText(body);
+      if (text) pairs.push({ role: 'assistant', key: 'gemini-r-' + (index + 1) + '-' + text.length, text, markdown: text });
+    }
+    const stop = Array.from(document.querySelectorAll('button.stop-button, button[aria-label="Stop response"], button[aria-label="Stop generating"], button[aria-label="停止回答"], button[aria-label="停止生成"], button[aria-label="停止响应"], button[aria-label="停止"]')).find(visible);
+    return { url: location.href, title: document.title, messages: pairs, streaming: Boolean(stop) };
+  })()`
+}

@@ -5,6 +5,7 @@ import { SITE_PRESETS } from './config.js'
 import { uploadProblem } from './attachments.js'
 import { randomUUID } from 'node:crypto'
 import { buildConversationReadExpression } from './conversation-sync.js'
+import { buildGeminiConversationReadExpression } from './gemini-dom.js'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createActivity } from './activity.js'
 
@@ -760,7 +761,6 @@ export class ChatSession {
     if (!sessionKey) throw new BridgeError('session-required', '读取网页消息需要当前 DSH sessionId。')
     const key = site + ':' + sessionKey
     return this.enqueue(async () => {
-      if (site === 'gemini') throw new BridgeError('sync-not-supported', 'Gemini 暂不支持回填网页历史到 DSH；未修改本地会话。')
       const preset = this.sitePreset(site)
       const known = this.conversations.get(key) || await this.driver.getSessionInfo?.(key)
       const url = String(known?.url || '')
@@ -774,8 +774,9 @@ export class ChatSession {
         await this.authGate(await this.driver.state(), this.adapter(site).inputSelector)
         let read
         const expected = new URL(url)
+        const expression = site === 'gemini' ? buildGeminiConversationReadExpression() : buildConversationReadExpression()
         for (let attempt = 0; attempt < 16; attempt++) {
-          read = (await this.driver.eval(buildConversationReadExpression(), { signal: options.signal }))?.result
+          read = (await this.driver.eval(expression, { signal: options.signal }))?.result
           const actual = new URL(String(read?.url || 'about:blank'))
           if (actual.origin !== expected.origin || actual.pathname !== expected.pathname) {
             throw new BridgeError('sync-conversation-changed', '网页跳转到了另一段对话，未修改本地会话。')
@@ -787,7 +788,10 @@ export class ChatSession {
         if (!Array.isArray(read?.messages) || !read.messages.length) {
           throw new BridgeError('sync-no-messages', '网页未加载出完整的对话内容，未修改本地会话。')
         }
-        const replyState = await readReplyState(this.driver, this.adapter(site), options.signal)
+        if (site === 'gemini' && read.streaming) {
+          throw new BridgeError('sync-web-busy', '网页正在生成回复，请结束后再同步。')
+        }
+        const replyState = site === 'gemini' ? null : await readReplyState(this.driver, this.adapter(site), options.signal)
         if (replyState?.streaming || replyState?.requestActive) {
           throw new BridgeError('sync-web-busy', '网页正在生成回复，请结束后再同步。')
         }

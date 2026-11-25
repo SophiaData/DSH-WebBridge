@@ -9,6 +9,7 @@ import { WebChatAdapter } from '../src/provider.js'
 import { WebBridgeSetup } from '../src/setup.js'
 import { ChatSession } from '../src/session.js'
 import { planConversationSync, appendMissingWebTurns, buildConversationReadExpression } from '../src/conversation-sync.js'
+import { buildGeminiConversationReadExpression } from '../src/gemini-dom.js'
 import { parseSyncRequest } from '../src/setup-contract.js'
 
 test('sync request accepts only an explicit WebBridge session and provider', () => {
@@ -140,6 +141,54 @@ test('sync fills only missing web suffix and remains idempotent', () => {
   assert.equal(planConversationSync([...local, ...imported], web, url).missing.length, 0)
   assert.throws(() => appendMissingWebTurns(session, { lastTurn: 6, openTurnStartSeq: 12 }, plan.missing,
     { provider: 'webbridge-chatgpt', model: 'chatgpt-web' }), /正在运行/)
+})
+
+test('sync strips protocol markers from restored web turns', () => {
+  const url = 'https://chatgpt.com/c/marker-chat'
+  const local = [
+    { role: 'user', id: 'a', source: { kind: 'user' }, content: [{ type: 'text', text: 'Hello' }] },
+  ]
+  const web = [
+    { role: 'user', key: '1:user', text: 'Hello' },
+    { role: 'assistant', key: '1:assistant', text: '<<< 你好！有什么我可以帮你的吗？ <<<END_FINAL>>>' },
+  ]
+  const plan = planConversationSync(local, web, url)
+  assert.equal(plan.missing.length, 1)
+  assert.equal(plan.missing[0].text, '你好！有什么我可以帮你的吗？')
+})
+
+test('Gemini conversation reader returns all visible query/response pairs', () => {
+  const userNode = text => ({ textContent: text, querySelectorAll: () => [{ textContent: text }] })
+  const responseNode = text => ({
+    textContent: text,
+    innerText: text,
+    checkVisibility: () => true,
+    querySelector: () => ({
+      textContent: text,
+      innerText: text,
+      cloneNode: () => ({
+        nodeType: 1,
+        textContent: text,
+        childNodes: [],
+        querySelectorAll: () => [],
+      }),
+    }),
+  })
+  const result = runInNewContext(buildGeminiConversationReadExpression(), {
+    location: { href: 'https://gemini.google.com/app/abc' },
+    document: {
+      title: 'Gemini chat',
+      querySelectorAll(selector) {
+        if (selector === 'user-query') return [userNode('First'), userNode('Second')]
+        if (selector === 'model-response') return [responseNode('Answer one'), responseNode('Answer two')]
+        return []
+      },
+    },
+  })
+  assert.deepEqual(Array.from(result.messages, message => [message.role, message.text]), [
+    ['user', 'First'], ['assistant', 'Answer one'], ['user', 'Second'], ['assistant', 'Answer two'],
+  ])
+  assert.equal(result.url, 'https://gemini.google.com/app/abc')
 })
 
 test('a transport-interrupted assistant reply imports only its missing continuation', () => {
